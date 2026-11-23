@@ -1,0 +1,2 @@
+# Kopera
+aplicativo
