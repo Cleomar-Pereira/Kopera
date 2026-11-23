@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function member(orgId) {
+      return signedIn() && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+    function admin(orgId) {
+      return member(orgId) && get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
+    }
+    match /profiles/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+    match /organizations/{orgId} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow read: if member(orgId);
+      allow update, delete: if admin(orgId);
+      match /members/{uid} {
+        allow read: if admin(orgId) || (signedIn() && request.auth.uid == uid);
+        allow create: if signedIn() && request.auth.uid == uid && (
+          get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerUid == request.auth.uid ||
+          (exists(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)) &&
+           get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.orgId == orgId &&
+           get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.email == request.auth.token.email.lower())
+        );
+        allow update: if admin(orgId);
+        allow delete: if admin(orgId) && uid != request.auth.uid;
+      }
+      match /receipts/{id} {
+        allow read, create, update: if member(orgId);
+        allow delete: if admin(orgId);
+      }
+      match /suppliers/{id} {
+        allow read, create, update: if member(orgId);
+        allow delete: if admin(orgId);
+      }
+      
+    }
+    match /invites/{code} {
+      allow get: if signedIn() && (resource.data.email == request.auth.token.email.lower() || admin(resource.data.orgId));
+      allow list: if signedIn() && admin(resource.data.orgId);
+      allow create: if signedIn() && request.resource.data.email is string && admin(request.resource.data.orgId);
+      allow delete: if signedIn() && (resource.data.email == request.auth.token.email.lower() || admin(resource.data.orgId));
+      allow update: if false;
+    }
+  }
+}
